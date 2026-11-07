@@ -1,0 +1,9 @@
+{
+  "name": "名古屋之旅",
+  "short_name": "名古屋",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#FAF7F6",
+  "theme_color": "#7A1F2B",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
