@@ -406,6 +406,15 @@ if(hk&&hk.length>=16){localStorage.setItem('tripKey',hk);history.replaceState(nu
 TRIP=localStorage.getItem('tripKey');
 if(firebaseConfig.apiKey.includes('請貼上'))alert('尚未設定 Firebase：請在 index.html 貼上 firebaseConfig');
 if(TRIP)start();else $('#join').style.display='flex';
+  document.addEventListener('visibilitychange',()=>{
+     if(document.visibilityState==='visible'&&ref){
+       db.goOffline();db.goOnline();
+       ref.once('value').then(s=>{if(s.exists()){S=norm(s.val());render()}}).catch(()=>{});
+       autoRate();
+     }
+   });
+   window.addEventListener('pageshow',e=>{if(e.persisted)location.reload()});
+   window.addEventListener('online',()=>db.goOnline());
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
 </script>
 </body>
