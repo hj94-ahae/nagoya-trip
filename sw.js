@@ -1,4 +1,4 @@
-const C='nagoya-v3';
+const C='nagoya-v4-transport';
 self.addEventListener('install',e=>{self.skipWaiting();
   e.waitUntil(caches.open(C).then(c=>c.addAll(['./','./index.html','./manifest.json','./icon.svg'])))});
 self.addEventListener('activate',e=>e.waitUntil(
