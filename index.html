@@ -66,6 +66,96 @@ dialog input,dialog select{width:100%;padding:9px;font-size:16px;border:1px soli
 #join{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;align-items:center;justify-content:center;padding:24px}
 #join .card{width:100%;max-width:380px}
 #join input{width:100%;padding:10px;font-size:16px;border:1px solid #D9CDCF;border-radius:8px;margin:10px 0}
+/* ===== 交通卡片 ===== */
+
+.transport-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.transport-title {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.transport-actions {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.transport-actions .ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.transport-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 3px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: var(--wl);
+  color: var(--wd);
+  font-size: 12px;
+}
+
+.transport-badge svg {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+}
+
+.transport-detail {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.transport-note {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.transport-restore {
+  margin-top: 12px;
+}
+
+dialog textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 9px;
+  margin-top: 3px;
+  border: 1px solid #D9CDCF;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--tx);
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.btn:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+@media (max-width: 380px) {
+  .transport-head {
+    flex-wrap: wrap;
+  }
+
+  .transport-title {
+    flex-basis: calc(100% - 85px);
+  }
+}
 </style>
 </head>
 <body>
@@ -139,7 +229,7 @@ dialog input,dialog select{width:100%;padding:9px;font-size:16px;border:1px soli
 <script>
 /* ===== ① 貼上你的 Firebase 設定 ===== */
 const firebaseConfig = {
-  apiKey: "AIzaSyBf0XuobTE3Z2yxujsdkKcuNuMiLyU5ni0",
+  apiKey: "",
   authDomain: "nagoya-3ea58.firebaseapp.com",
   databaseURL: "https://nagoya-3ea58-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "nagoya-3ea58",
@@ -193,9 +283,39 @@ function seed(){
       flights:{out:{label:'去程',date:D(7),no:'',from:'',dep:'16:45',to:'中部國際機場',arr:'20:25'},
                back:{label:'回程',date:D(11),no:'',from:'中部國際機場',dep:'13:15',to:'',arr:'15:25'}}}};
 }
-function norm(v){v=v||{};const s=seed();
-  return {days:v.days||{},items:v.items||{},expenses:v.expenses||{},rate:v.rate||s.rate,
-    info:{hotel:{...s.info.hotel,...(v.info?.hotel||{})},flights:{out:{...s.info.flights.out,...(v.info?.flights?.out||{})},back:{...s.info.flights.back,...(v.info?.flights?.back||{})}}}};
+
+function norm(v) {
+  v = v || {};
+  const s = seed();
+
+  return {
+    days: v.days || {},
+    items: v.items || {},
+    expenses: v.expenses || {},
+
+    // 交通修改資料：使用景點 ID 對應
+    transport: v.transport || {},
+
+    rate: v.rate || s.rate,
+
+    info: {
+      hotel: {
+        ...s.info.hotel,
+        ...(v.info?.hotel || {})
+      },
+
+      flights: {
+        out: {
+          ...s.info.flights.out,
+          ...(v.info?.flights?.out || {})
+        },
+        back: {
+          ...s.info.flights.back,
+          ...(v.info?.flights?.back || {})
+        }
+      }
+    }
+  };
 }
 
 /* 交通資料（依景點名稱關鍵字自動對應，僅供參考） */
@@ -278,23 +398,526 @@ function editItem(dayId,id){
     {name:'place',label:'地圖地點（交通查詢用，可留空）'}],it,
     f=>{if(!f.name.trim()){alert('請輸入景點名稱');return false}
       id?ref.child('items/'+id).update(f):ref.child('items/'+uid()).set(f)})}
-function delItem(id){if(confirm('確定刪除這個景點？'))ref.child('items/'+id).remove()}
+async function delItem(id) {
+  if (!confirm('確定刪除這個景點？\n對應交通修改資料也會一併刪除。')) {
+    return;
+  }
+
+  if (!ref) return alert('尚未連接共用行程。');
+
+  if (!navigator.onLine) {
+    return alert('目前離線，請恢復網路後再刪除。');
+  }
+
+  try {
+    await ref.update({
+      ['items/' + id]: null,
+      ['transport/' + id]: null
+    });
+  } catch (error) {
+    alert('景點刪除失敗。\n' + error.message);
+  }
+}
 
 /* ===== 交通（隨景點自動變動） ===== */
 function renderRoutes(){
-  const hotel=S.info.hotel.name;
-  $('#routes').innerHTML=dayList().map(d=>{
-    let prev=S.info.flights.out.date===d.date?'中部国際空港':hotel;const shown=new Set();
-    const html=itemsOf(d.id).map(it=>{
-      const dest=it.place||it.name, from=prev; prev=dest;
-      const r=ROUTES.find(r=>r.k.some(k=>it.name.includes(k)));
-      if(r){if(shown.has(r.t))return'';shown.add(r.t)}else if(dest===from)return'';
-      const map=`https://www.google.com/maps/dir/?api=1&origin=${enc(from)}&destination=${enc(dest)}&travelmode=transit`;
-      return `<div class="route"><b>${esc(it.time)}　${r?r.t:esc(from)+' → '+esc(dest)}</b>
-        ${r?`<p><span class="tag">搭乘</span>${r.how}</p><p><span class="tag">購票</span>${r.buy}</p><p><span class="tag">票價</span>${r.cost}</p>`
-           :'<p class="muted">沒有內建資料，請用下方連結查詢</p>'}
-        <p><a href="${map}" target="_blank" rel="noopener">Google Maps 大眾運輸路線 ›</a></p></div>`}).join('');
-    return `<div class="card"><h3>${esc(d.title)} <span class="muted">${md(d.date)}</span></h3>${html||'<p class="muted">沒有需要搭車的行程</p>'}</div>`}).join('');
+  /* ===== 交通：圖示、備註、編輯與刪除 ===== */
+
+/*
+ * 保留原本 ROUTES 作為初始參考內容。
+ * 使用 transport/{景點ID} 儲存使用者的修改。
+ * hidden=true 表示隱藏交通，不刪除景點。
+ */
+
+// 線條圖示：使用原本已有的 sv() 工具
+const TRANSPORT_ICONS = {
+  train: sv(`
+    <rect x="5" y="3" width="14" height="15" rx="4"/>
+    <path d="M5 10h14M12 3v7M8 18l-2 3M16 18l2 3"/>
+    <circle cx="8.5" cy="14" r="1"/>
+    <circle cx="15.5" cy="14" r="1"/>
+  `),
+
+  metro: sv(`
+    <path d="M4 21V10a8 8 0 0 1 16 0v11"/>
+    <rect x="7" y="7" width="10" height="11" rx="2"/>
+    <path d="M7 12h10M9 18l-1 3M15 18l1 3"/>
+    <path d="M9 15h.01M15 15h.01"/>
+  `),
+
+  bullet: sv(`
+    <path d="M3 17h16a2 2 0 0 0 2-2c0-5-5-9-12-9H5"/>
+    <path d="M10 6l4 6h6M3 12h7M3 21h18"/>
+    <path d="M7 17l-2 4M17 17l2 4"/>
+  `),
+
+  bus: sv(`
+    <rect x="5" y="3" width="14" height="17" rx="3"/>
+    <path d="M5 11h14M12 3v8M3 7v5M21 7v5"/>
+    <path d="M7 20v1M17 20v1"/>
+    <circle cx="8" cy="16" r="1"/>
+    <circle cx="16" cy="16" r="1"/>
+  `),
+
+  car: sv(`
+    <path d="M4 11l2-6h12l2 6"/>
+    <rect x="3" y="11" width="18" height="8" rx="2"/>
+    <path d="M6 19v2M18 19v2M7 15h.01M17 15h.01"/>
+  `),
+
+  walk: sv(`
+    <circle cx="14" cy="4" r="2"/>
+    <path d="M12 8l-3 5-4 2M12 8l4 4 4 1"/>
+    <path d="M12 8l1 7-4 6M13 15l5 6"/>
+  `),
+
+  plane: sv(`
+    <path d="M12 3v18"/>
+    <path d="M12 7l9 6v3l-9-3-9 3v-3l9-6"/>
+    <path d="M12 18l4 3M12 18l-4 3"/>
+  `),
+
+  ship: sv(`
+    <path d="M5 12V6h14v6M9 6V3h6v3"/>
+    <path d="M3 13l9-3 9 3-3 6H6l-3-6zM12 10v9"/>
+    <path d="M3 22l3-1 3 1 3-1 3 1 3-1 3 1"/>
+  `),
+
+  mixed: sv(`
+    <path d="M4 7h15l-4-4M20 17H5l4 4"/>
+    <path d="M19 7l-4 4M5 17l4-4"/>
+  `)
+};
+
+const TRANSPORT_MODES = [
+  { value: 'meitetsu', label: '名鐵', icon: 'train' },
+  { value: 'jr', label: 'JR／特急', icon: 'train' },
+  { value: 'metro', label: '地下鐵', icon: 'metro' },
+  { value: 'shinkansen', label: '新幹線', icon: 'bullet' },
+  { value: 'rail', label: '其他鐵路', icon: 'train' },
+  { value: 'bus', label: '市區巴士', icon: 'bus' },
+  { value: 'highwayBus', label: '高速巴士', icon: 'bus' },
+  { value: 'taxi', label: '計程車', icon: 'car' },
+  { value: 'car', label: '自駕／租車', icon: 'car' },
+  { value: 'walk', label: '步行', icon: 'walk' },
+  { value: 'plane', label: '飛機', icon: 'plane' },
+  { value: 'ship', label: '船舶', icon: 'ship' },
+  { value: 'mixed', label: '轉乘／多種方式', icon: 'mixed' }
+];
+
+function transportMode(value) {
+  return TRANSPORT_MODES.find(m => m.value === value)
+    || TRANSPORT_MODES.find(m => m.value === 'mixed');
+}
+
+/*
+ * 只根據既有交通文字初步分類。
+ * 不是即時路線查詢，使用者可以自行修改。
+ */
+function guessTransportMode(text) {
+  const t = String(text || '');
+
+  if (/JR/.test(t) && /巴士/.test(t)) return 'mixed';
+  if (/名鐵/.test(t) && /地下鐵/.test(t)) return 'mixed';
+  if (/新幹線/.test(t)) return 'shinkansen';
+  if (/高速巴士/.test(t)) return 'highwayBus';
+  if (/巴士|公車/.test(t)) return 'bus';
+  if (/名鐵/.test(t)) return 'meitetsu';
+  if (/JR|ひだ/.test(t)) return 'jr';
+  if (/地下鐵/.test(t)) return 'metro';
+  if (/計程車/.test(t)) return 'taxi';
+  if (/租車|自駕/.test(t)) return 'car';
+  if (/飛機|航班/.test(t)) return 'plane';
+  if (/船|渡輪/.test(t)) return 'ship';
+  if (/步行/.test(t)) return 'walk';
+
+  return 'mixed';
+}
+
+/*
+ * 每個景點最多對應一筆交通。
+ * 不再使用標題去重，避免不同景點的交通共用同一筆編輯資料。
+ */
+function routesOf(dayId) {
+  const day = S.days[dayId];
+  if (!day) return [];
+
+  let previous = S.info.flights.out.date === day.date
+    ? '中部国際空港'
+    : S.info.hotel.name;
+
+  const result = [];
+
+  itemsOf(dayId).forEach(it => {
+    const destination = it.place || it.name;
+    const origin = previous;
+
+    previous = destination;
+
+    const reference = ROUTES.find(r =>
+      r.k.some(k => String(it.name || '').includes(k))
+    );
+
+    const saved = S.transport[it.id];
+
+    // 與原本相同：沒有參考資料且起終點相同時不自動顯示。
+    // 已經有儲存紀錄的仍保留，避免修改內容突然消失。
+    if (!reference && destination === origin && !saved) return;
+
+    const base = {
+      title: reference
+        ? reference.t
+        : `${origin} → ${destination}`,
+
+      from: origin,
+      to: destination,
+
+      mode: guessTransportMode(reference?.how || ''),
+
+      how: reference?.how || '',
+      buy: reference?.buy || '',
+      cost: reference?.cost || '',
+      note: '',
+      hidden: false
+    };
+
+    result.push({
+      ...base,
+      ...(saved || {}),
+      id: it.id,
+      day: dayId,
+      time: it.time || '',
+      itemName: it.name || ''
+    });
+  });
+
+  return result;
+}
+
+function findRoute(id) {
+  const item = S.items[id];
+  if (!item) return null;
+
+  return routesOf(item.day).find(r => r.id === id) || null;
+}
+
+// 安全產生 onclick 的字串參數
+function routeArg(value) {
+  return esc(JSON.stringify(String(value)));
+}
+
+function routeDetail(label, value) {
+  if (!value) return '';
+
+  return `
+    <p class="transport-detail"><span class="tag">${esc(label)}</span>${esc(value)}</p>
+  `;
+}
+
+function renderRoutes() {
+  $('#routes').innerHTML = dayList().map(d => {
+    const routes = routesOf(d.id);
+    const visible = routes.filter(r => !r.hidden);
+    const hiddenCount = routes.filter(r => r.hidden).length;
+
+    const html = visible.map(r => {
+      const mode = transportMode(r.mode);
+
+      const travelMode =
+        r.mode === 'walk' ? 'walking' :
+        ['taxi', 'car'].includes(r.mode) ? 'driving' :
+        'transit';
+
+      const map =
+        'https://www.google.com/maps/dir/?api=1' +
+        `&origin=${enc(r.from)}` +
+        `&destination=${enc(r.to)}` +
+        `&travelmode=${travelMode}`;
+
+      // 飛機與船舶不把大眾運輸連結當作適用路線
+      const mapLink = ['plane', 'ship'].includes(r.mode)
+        ? `
+          <a
+            href="https://www.google.com/maps/search/?api=1&query=${enc(r.to)}"
+            target="_blank"
+            rel="noopener"
+          >查看目的地位置 ›</a>
+        `
+        : `
+          <a href="${esc(map)}" target="_blank" rel="noopener">
+            ${r.mode === 'walk'
+              ? 'Google Maps 步行路線'
+              : ['taxi', 'car'].includes(r.mode)
+                ? 'Google Maps 開車路線'
+                : 'Google Maps 大眾運輸路線'} ›
+          </a>
+        `;
+
+      return `
+        <div class="route">
+          <div class="transport-head">
+            <div class="transport-title">
+              <b>${esc(r.time)}　${esc(r.title)}</b>
+              <div class="muted">
+                對應景點：${esc(r.itemName)}
+              </div>
+            </div>
+
+            <div class="transport-actions">
+              <button
+                type="button"
+                class="ic"
+                title="修改交通"
+                aria-label="修改交通"
+                onclick="editRoute(${routeArg(r.id)})"
+              >${I.edit}</button>
+
+              <button
+                type="button"
+                class="ic"
+                title="刪除交通"
+                aria-label="刪除交通"
+                onclick="deleteRoute(${routeArg(r.id)}, this)"
+              >${I.del}</button>
+            </div>
+          </div>
+
+          <div class="transport-badge">
+            <span aria-hidden="true">
+              ${TRANSPORT_ICONS[mode.icon]}
+            </span>
+            <span>${esc(mode.label)}</span>
+          </div>
+
+          <p class="muted">
+            ${esc(r.from)} → ${esc(r.to)}
+          </p>
+
+          ${routeDetail('搭乘', r.how)}
+          ${routeDetail('購票', r.buy)}
+          ${routeDetail('票價', r.cost)}
+
+          ${!r.how && !r.buy && !r.cost
+            ? '<p class="muted">尚未填寫交通資訊，可按鉛筆編輯。</p>'
+            : ''}
+
+          <div class="transport-note">
+            ${r.note
+              ? routeDetail('備註', r.note)
+              : '<span class="muted">備註：尚未填寫</span>'}
+          </div>
+
+          <p>${mapLink}</p>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="card">
+        <h3>
+          ${esc(d.title)}
+          <span class="muted">${md(d.date)}</span>
+        </h3>
+
+        ${html || '<p class="muted">沒有顯示中的交通紀錄</p>'}
+
+        ${hiddenCount ? `
+          <button
+            type="button"
+            class="add transport-restore"
+            onclick="restoreRoutes(${routeArg(d.id)}, this)"
+          >
+            恢復本日已刪除交通（${hiddenCount} 筆）
+          </button>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+/* ===== 交通編輯表單 ===== */
+
+function editRoute(id) {
+  const r = findRoute(id);
+  if (!r) return alert('找不到對應景點，請重新整理後再試。');
+
+  // 沿用現有表單產生器；下方另外處理非同步儲存。
+  openForm('修改交通', [
+    { name: 'title', label: '交通標題' },
+    { name: 'from', label: '出發地' },
+    { name: 'to', label: '目的地' },
+
+    {
+      name: 'mode',
+      label: '交通工具',
+      opts: TRANSPORT_MODES.map(m => [m.value, m.label])
+    },
+
+    {
+      html: `
+        <label>搭乘方式
+          <textarea name="how" rows="3">${esc(r.how)}</textarea>
+        </label>
+      `
+    },
+
+    {
+      html: `
+        <label>購票方式
+          <textarea name="buy" rows="2">${esc(r.buy)}</textarea>
+        </label>
+      `
+    },
+
+    { name: 'cost', label: '參考票價（文字）' },
+
+    {
+      html: `
+        <label>備註
+          <textarea
+            name="note"
+            rows="3"
+            placeholder="例如：搭乘時間、月台、集合地點"
+          >${esc(r.note)}</textarea>
+        </label>
+      `
+    }
+  ], r, () => false);
+
+  const dialog = $('#dlg');
+  const form = $('#dlgF');
+  const saveButton = $('#dlgOk');
+  const cancelButton = dialog.querySelector('.btns .btn:not(.pri)');
+
+  const activeRef = ref;
+
+  // 只改交通表單，不影響其他表單目前的儲存方式。
+  saveButton.onclick = async () => {
+    if (saveButton.disabled) return;
+
+    const values = Object.fromEntries(new FormData(form));
+
+    const data = {
+      title: String(values.title || '').trim(),
+      from: String(values.from || '').trim(),
+      to: String(values.to || '').trim(),
+      mode: values.mode,
+      how: String(values.how || '').trim(),
+      buy: String(values.buy || '').trim(),
+      cost: String(values.cost || '').trim(),
+      note: String(values.note || '').trim(),
+      hidden: false
+    };
+
+    if (!data.title) return alert('請輸入交通標題。');
+
+    if (!data.from || !data.to) {
+      return alert('請填寫出發地與目的地。');
+    }
+
+    if (!TRANSPORT_MODES.some(m => m.value === data.mode)) {
+      return alert('請選擇有效的交通工具。');
+    }
+
+    if (!S.items[id]) {
+      return alert('對應景點已不存在，請關閉視窗後重新確認。');
+    }
+
+    if (!activeRef) return alert('尚未連接共用行程。');
+
+    // 離線時保留表單，不讓使用者誤以為已同步。
+    if (!navigator.onLine) {
+      return alert('目前離線，請恢復網路後再儲存。');
+    }
+
+    const oldText = saveButton.textContent;
+    const fields = [...form.querySelectorAll('input, select, textarea')];
+    const blockCancel = event => event.preventDefault();
+
+    saveButton.disabled = true;
+    cancelButton.disabled = true;
+    saveButton.textContent = '儲存中…';
+    fields.forEach(field => field.disabled = true);
+    dialog.addEventListener('cancel', blockCancel);
+
+    try {
+      await activeRef.child('transport/' + id).update(data);
+
+      // 收到 Firebase 寫入成功後才關閉。
+      dialog.close();
+    } catch (error) {
+      alert('交通儲存失敗，輸入內容已保留。\n' + error.message);
+    } finally {
+      saveButton.disabled = false;
+      cancelButton.disabled = false;
+      saveButton.textContent = oldText;
+      fields.forEach(field => field.disabled = false);
+      dialog.removeEventListener('cancel', blockCancel);
+    }
+  };
+}
+
+/* ===== 刪除／恢復交通 ===== */
+
+async function deleteRoute(id, button) {
+  if (button?.disabled) return;
+
+  if (!confirm('確定刪除這筆交通？\n對應景點不會刪除，之後可恢復。')) {
+    return;
+  }
+
+  if (!ref) return alert('尚未連接共用行程。');
+
+  if (!navigator.onLine) {
+    return alert('目前離線，請恢復網路後再刪除。');
+  }
+
+  if (button) button.disabled = true;
+
+  try {
+    // 保存隱藏狀態，避免自動產生的交通重新出現。
+    await ref.child('transport/' + id).update({
+      hidden: true
+    });
+  } catch (error) {
+    alert('交通刪除失敗。\n' + error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function restoreRoutes(dayId, button) {
+  if (button?.disabled) return;
+
+  const hiddenRoutes = routesOf(dayId).filter(r => r.hidden);
+  if (!hiddenRoutes.length) return;
+
+  if (!confirm(`恢復本日已刪除的 ${hiddenRoutes.length} 筆交通？`)) {
+    return;
+  }
+
+  if (!ref) return alert('尚未連接共用行程。');
+
+  if (!navigator.onLine) {
+    return alert('目前離線，請恢復網路後再恢復交通。');
+  }
+
+  const updates = {};
+
+  hiddenRoutes.forEach(r => {
+    updates[`transport/${r.id}/hidden`] = false;
+  });
+
+  if (button) button.disabled = true;
+
+  try {
+    await ref.update(updates);
+  } catch (error) {
+    alert('恢復交通失敗。\n' + error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
 }
 
 /* ===== 匯率 ===== */
@@ -406,7 +1029,7 @@ if(hk&&hk.length>=16){localStorage.setItem('tripKey',hk);history.replaceState(nu
 TRIP=localStorage.getItem('tripKey');
 if(firebaseConfig.apiKey.includes('請貼上'))alert('尚未設定 Firebase：請在 index.html 貼上 firebaseConfig');
 if(TRIP)start();else $('#join').style.display='flex';
-  document.addEventListener('visibilitychange',()=>{
+document.addEventListener('visibilitychange',()=>{
      if(document.visibilityState==='visible'&&ref){
        db.goOffline();db.goOnline();
        ref.once('value').then(s=>{if(s.exists()){S=norm(s.val());render()}}).catch(()=>{});
